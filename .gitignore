@@ -1,0 +1,28 @@
+# Ambiente virtual
+venv/
+
+# Cache do Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Arquivos de dados (sensíveis - não sobem para o GitHub)
+bases_brutas/
+*.xls
+*.xlsx
+*.csv
+
+# Outputs (resultados gerados)
+outputs/
+
+# Arquivos temporários
+temp/
+
+# IDE
+.vscode/
+.idea/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+EOF
