@@ -50,10 +50,30 @@ print("\n🔍 Filtrando registros válidos...")
 df_validos = df[df['STATUS'] == 'CONFIRMADO'].copy()
 print(f"   CONFIRMADOS: {len(df_validos)}")
 
-# Se quiser incluir os REVISADOS manualmente, descomente:
-# df_revisados = pd.read_excel('PLANILHA_REVISAO_HUMANA.xlsx')
-# ids_confirmados = df_revisados[df_revisados['DECISAO'] == 'CONFIRMADO']['OBJECTID'].tolist()
-# df_validos = pd.concat([df_validos, df[df['OBJECTID'].isin(ids_confirmados)]])
+# Incluir REVISADOS manualmente (se a equipe já preencheu a planilha)
+import glob
+planilhas_revisao = sorted(glob.glob('outputs/ENRIQUECIDO_*/PLANILHA_REVISAO_ENRIQUECIDA.xlsx'))
+if planilhas_revisao:
+    planilha_revisao = planilhas_revisao[-1]
+    print(f"\n📂 Carregando revisões: {planilha_revisao}")
+    df_revisados = pd.read_excel(planilha_revisao)
+    
+    # Filtra apenas os CONFIRMADO pela equipe
+    if 'DECISAO' in df_revisados.columns:
+        ids_confirmados = df_revisados[df_revisados['DECISAO'] == 'CONFIRMADO']['OBJECTID'].tolist()
+        print(f"   Decisões encontradas: {len(df_revisados)}")
+        print(f"   CONFIRMADO: {len(ids_confirmados)}")
+        print(f"   REJEITADO: {len(df_revisados[df_revisados['DECISAO'] == 'REJEITADO'])}")
+        print(f"   Em branco: {df_revisados['DECISAO'].isna().sum()}")
+        
+        # Adiciona os confirmados pela equipe aos válidos
+        df_revisados_validos = df[df['OBJECTID'].isin(ids_confirmados)]
+        df_validos = pd.concat([df_validos, df_revisados_validos])
+        print(f"   Total de válidos (automáticos + revisados): {len(df_validos)}")
+    else:
+        print("   ⚠️ Coluna DECISAO não encontrada na planilha de revisão")
+else:
+    print("\n⚠️ Nenhuma planilha de revisão encontrada. Apenas CONFIRMADOS automáticos serão incluídos.")
 
 # ==============================================
 # 3. REMOVER DUPLICAÇÕES
@@ -89,7 +109,7 @@ colunas_entrega = {
     'SAUDE_DATA_NASC': 'DATA_NASCIMENTO',
     'SAUDE_TELEFONE': 'TELEFONE_SAUDE',
     'SAUDE_CARTAO_SUS': 'CARTAO_SUS',
-    'SAUDE_STATUS': 'STATUS_SAUDE',
+    'SAUDE_STATUS': 'FONTE_SAUDE',
 }
 
 # Seleciona e renomeia apenas as colunas que existem
