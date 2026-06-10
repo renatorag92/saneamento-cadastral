@@ -223,4 +223,69 @@ print(f"\n📁 Resultados em: {PASTA_OUTPUT}/")
 print("   ✅ BASE_ENRIQUECIDA_COMPLETA.xlsx (tudo junto)")
 print("   ✅ BASE_ENRIQUECIDA_CONSOLIDADA.xlsx (separado por abas)")
 print("   ✅ INDICADORES_ENRIQUECIMENTO.xlsx")
+# ==============================================
+# PLANILHA DE REVISÃO ENRIQUECIDA
+# ==============================================
+print("\n📊 Gerando planilha de revisão enriquecida...")
+
+df_revisao = df_resultado[df_resultado['STATUS'] == 'EM_REVISÃO'].copy()
+
+# Colunas que ajudam na decisão (dados da saúde + dados originais)
+colunas_revisao = [
+    'OBJECTID',
+    'NOME_PESQUISA', 'NOME_IPTU',           # Nomes para comparação
+    'CPF_CNPJ_PESQUISA', 'CPF_CNPJ_IPTU',   # Documentos
+    'ENDERECO_PESQUISA', 'ENDERECO_IPTU',   # Endereços
+    'BAIRRO_PESQUISA',
+    'TELEFONE_PESQUISA', 'TELEFONE_IPTU',   # Telefones
+    'SCORE', 'MOTIVO',                       # Evidência do match
+    # Dados da saúde (NOVOS!)
+    'SAUDE_NOME', 'SAUDE_DATA_NASC', 'SAUDE_TELEFONE', 'SAUDE_CARTAO_SUS', 'SAUDE_STATUS',
+    # Colunas para preenchimento da equipe
+    'REVISOR', 'DECISAO', 'OBSERVACAO'
+]
+
+# Cria colunas de decisão se não existirem
+for col in ['REVISOR', 'DECISAO', 'OBSERVACAO']:
+    if col not in df_revisao.columns:
+        df_revisao[col] = ''
+
+# Exporta apenas as colunas que existem
+colunas_exportar = [c for c in colunas_revisao if c in df_revisao.columns]
+df_revisao[colunas_exportar].to_excel(
+    f'{PASTA_OUTPUT}/PLANILHA_REVISAO_ENRIQUECIDA.xlsx', index=False)
+
+print(f"   ✅ PLANILHA_REVISAO_ENRIQUECIDA.xlsx com {len(df_revisao)} casos")
+print(f"   Colunas extras da saúde: SAUDE_NOME, SAUDE_DATA_NASC, SAUDE_TELEFONE, SAUDE_CARTAO_SUS")
 print("\n🎉 Enriquecimento concluído!")
+# ==============================================
+# ADICIONAR VALIDAÇÃO DE DADOS (DROPDOWN)
+# ==============================================
+print("\n🔒 Adicionando validação de dados (dropdown)...")
+
+from openpyxl import load_workbook
+from openpyxl.worksheet.datavalidation import DataValidation
+
+wb = load_workbook(f'{PASTA_OUTPUT}/PLANILHA_REVISAO_ENRIQUECIDA.xlsx')
+ws = wb.active
+
+# Encontra a coluna DECISAO
+col_decisao = None
+for col_idx, cell in enumerate(ws[1], 1):
+    if cell.value == 'DECISAO':
+        col_decisao = col_idx
+        break
+
+if col_decisao:
+    # Cria validação com lista suspensa
+    dv = DataValidation(type="list", formula1='"CONFIRMADO,REJEITADO"', allow_blank=True)
+    dv.error = "Digite CONFIRMADO ou REJEITADO"
+    dv.errorTitle = "Valor inválido"
+    
+    col_letra = chr(64 + col_decisao) if col_decisao <= 26 else 'A'
+    dv.add(f'{col_letra}2:{col_letra}{ws.max_row}')
+    ws.add_data_validation(dv)
+
+wb.save(f'{PASTA_OUTPUT}/PLANILHA_REVISAO_ENRIQUECIDA.xlsx')
+print("   ✅ Dropdown adicionado na coluna DECISAO")
+
