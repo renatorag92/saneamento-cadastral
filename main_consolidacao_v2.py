@@ -23,7 +23,7 @@ PASTA_OUTPUT = f'outputs/CONSOLIDADO_v2_{DATA_EXECUCAO}'
 ARQUIVO_LOG = f'{PASTA_OUTPUT}/log_consolidacao.txt'
 os.makedirs(PASTA_OUTPUT, exist_ok=True)
 
-ALTA_CONFIANCA = 85
+ALTA_CONFIANCA = 80
 MEDIA_CONFIANCA = 70
 
 PASTA_BRUTAS = 'bases_brutas'
@@ -292,6 +292,37 @@ print(f"   Imóveis sem bairro correspondente: {sem_bairro}")
 print("\n📊 Consolidando...")
 df_final = pd.concat([df_det, df_prob], ignore_index=True)
 
+total = len(df_final)
+confirmados = len(df_final[df_final['STATUS'] == 'CONFIRMADO'])
+em_revisao = len(df_final[df_final['STATUS'] == 'EM_REVISÃO'])
+pendentes = len(df_final[df_final['STATUS'] == 'PENDENTE'])
+
+# ==============================================
+# REMOVER DUPLICATAS DE MATCH (BUG FIX)
+# ==============================================
+print("\n🧹 Removendo matches duplicados...")
+
+# 1. Remove pesquisas de campo duplicadas
+antes = len(df_final)
+df_final = df_final.sort_values('SCORE', ascending=False)
+df_final = df_final.drop_duplicates(subset='OBJECTID', keep='first')
+depois = len(df_final)
+print(f"   Removidas {antes - depois} linhas de pesquisa duplicadas")
+
+# 2. NOVO: Remove atribuições múltiplas do mesmo IPTU (Impede clonagem de dados)
+mask_tem_iptu = df_final['INSCRICAO_IPTU'] != ''
+df_com_iptu = df_final[mask_tem_iptu]
+df_sem_iptu = df_final[~mask_tem_iptu]
+
+antes_iptu = len(df_com_iptu)
+df_com_iptu = df_com_iptu.drop_duplicates(subset='INSCRICAO_IPTU', keep='first')
+depois_iptu = len(df_com_iptu)
+print(f"   Removidas {antes_iptu - depois_iptu} atribuições repetidas do mesmo cadastro de IPTU")
+
+# Junta tudo de volta
+df_final = pd.concat([df_com_iptu, df_sem_iptu]).sort_values('SCORE', ascending=False)
+
+# 3. NOVO: Recalcula os totais para o log ficar correto após a dupla limpeza
 total = len(df_final)
 confirmados = len(df_final[df_final['STATUS'] == 'CONFIRMADO'])
 em_revisao = len(df_final[df_final['STATUS'] == 'EM_REVISÃO'])

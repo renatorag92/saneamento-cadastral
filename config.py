@@ -4,7 +4,7 @@
 # ==============================================
 
 # Thresholds de confiança
-ALTA_CONFIANCA = 90
+ALTA_CONFIANCA = 80
 MEDIA_CONFIANCA = 70
 
 # Pesos para scoring probabilístico
