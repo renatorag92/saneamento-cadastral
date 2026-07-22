@@ -2,12 +2,13 @@
 # ==============================================
 # CONSOLIDAÇÃO FINAL - BASE ÚNICA LIMPA
 # Junta CONFIRMADOS + REVISADOS (após decisão humana)
-# Remove duplicações e colunas de debug
+# Remove duplicações e gera lista de campo inteligência por bairro
 # ==============================================
 
 import pandas as pd
 import os
 from datetime import datetime
+import glob
 
 # ==============================================
 # CONFIGURAÇÃO
@@ -21,171 +22,176 @@ print("🏁 CONSOLIDAÇÃO FINAL - BASE ÚNICA PARA ENTREGA")
 print(f"   Data: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
 print("=" * 60)
 
-# ==============================================
-# 1. CARREGAR BASE ENRIQUECIDA
-# ==============================================
-import glob
+# Dicionário de renomeio padrão para alinhar as colunas das duas bases
+renomeios_padrao = {
+    'SAUDE_NOME': 'NOME_SAUDE',
+    'SAUDE_CARTAO_SUS': 'CPF_SAUDE',
+    'SAUDE_TELEFONE': 'TEL_SAUDE',
+    'SAUDE_DATA_NASC': 'DATA_NASC',
+    'CPF_CNPJ_PESQUISA': 'CPF_PESQUISA',
+    'CPF_CNPJ_IPTU': 'CPF_IPTU',
+    'TELEFONE_PESQUISA': 'TEL_PESQUISA',
+    'TELEFONE_IPTU': 'TEL_IPTU',
+}
 
-# Pega o enriquecimento mais recente
+# ==============================================
+# 1. CARREGAR BASE ENRIQUECIDA E REVISÕES
+# ==============================================
 arquivos = sorted(glob.glob('outputs/ENRIQUECIDO_*/BASE_ENRIQUECIDA_COMPLETA.xlsx'))
 if not arquivos:
     print("❌ Nenhuma base enriquecida encontrada.")
     exit()
 
 arquivo_entrada = arquivos[-1]
-print(f"\n📂 Carregando: {arquivo_entrada}")
+print(f"\n📂 Carregando base bruta: {arquivo_entrada}")
+df_bruto = pd.read_excel(arquivo_entrada)
 
-df = pd.read_excel(arquivo_entrada)
-print(f"   Total de registros: {len(df)}")
-
-# ==============================================
-# 2. FILTRAR REGISTROS VÁLIDOS
-# ==============================================
-print("\n🔍 Filtrando registros válidos...")
-
-# Mantém apenas CONFIRMADOS (automáticos + revisados)
-# Se você tiver uma planilha de revisão com decisões, podemos carregá-la aqui
-# Por enquanto, mantemos apenas os CONFIRMADOS
-
-df_validos = df[df['STATUS'] == 'CONFIRMADO'].copy()
-print(f"   CONFIRMADOS: {len(df_validos)}")
-
-# Incluir REVISADOS manualmente (se a equipe já preencheu a planilha)
-import glob
+# Carrega planilha de revisão humana
 planilhas_revisao = sorted(glob.glob('outputs/ENRIQUECIDO_*/PLANILHA_REVISAO_ENRIQUECIDA.xlsx'))
-if planilhas_revisao:
-    planilha_revisao = planilhas_revisao[-1]
-    print(f"\n📂 Carregando revisões: {planilha_revisao}")
-    df_revisados = pd.read_excel(planilha_revisao)
-    
-    # Filtra apenas os CONFIRMADO pela equipe
-    if 'DECISAO' in df_revisados.columns:
-        ids_confirmados = df_revisados[df_revisados['DECISAO'] == 'CONFIRMADO']['OBJECTID'].tolist()
-        print(f"   Decisões encontradas: {len(df_revisados)}")
-        print(f"   CONFIRMADO: {len(ids_confirmados)}")
-        print(f"   REJEITADO: {len(df_revisados[df_revisados['DECISAO'] == 'REJEITADO'])}")
-        print(f"   Em branco: {df_revisados['DECISAO'].isna().sum()}")
-        
-        # Adiciona os confirmados pela equipe aos válidos
-        df_revisados_validos = df[df['OBJECTID'].isin(ids_confirmados)]
-        df_validos = pd.concat([df_validos, df_revisados_validos])
-        print(f"   Total de válidos (automáticos + revisados): {len(df_validos)}")
-    else:
-        print("   ⚠️ Coluna DECISAO não encontrada na planilha de revisão")
-else:
-    print("\n⚠️ Nenhuma planilha de revisão encontrada. Apenas CONFIRMADOS automáticos serão incluídos.")
+if not planilhas_revisao:
+    print("❌ Planilha de revisão manual não encontrada. Execute a revisão humana primeiro.")
+    exit()
+
+planilha_revisao = planilhas_revisao[-1]
+print(f"📂 Carregando revisões humanas: {planilha_revisao}")
+df_revisao_humana = pd.read_excel(planilha_revisao)
 
 # ==============================================
-# 3. REMOVER DUPLICAÇÕES
+# 2. SEGREGAÇÃO AUTOMÁTICA DAS ESTEIRAS
 # ==============================================
-print("\n🧹 Removendo duplicações...")
+print("\n⚡ Processando decisões e unificando dados mestres...")
 
+# --- ESTEIRA A: CONFIRMADOS DIRETOS PELA MÁQUINA ---
+df_auto_confirmados = df_bruto[df_bruto['STATUS'] == 'CONFIRMADO'].copy()
+# Para os automáticos, o dado final padrão é o coletado na pesquisa de campo
+df_auto_confirmados['NOME_FINAL'] = df_auto_confirmados['NOME_PESQUISA']
+df_auto_confirmados['CPF_FINAL'] = df_auto_confirmados['CPF_CNPJ_PESQUISA']
+df_auto_confirmados['TEL_FINAL'] = df_auto_confirmados['TELEFONE_PESQUISA']
+# Alinha o nome das colunas com o padrão da planilha de revisão
+df_auto_confirmados = df_auto_confirmados.rename(columns=renomeios_padrao)
+
+# --- ESTEIRA B: CONFIRMADOS PELO REVISOR HUMANO ---
+# Puxa diretamente os dados da planilha de revisão (mantém as colunas _FINAL e edições manuais!)
+df_humano_confirmados = df_revisao_humana[df_revisao_humana['DECISAO'] == 'CONFIRMADO'].copy()
+
+# UNIFICAÇÃO DA BASE FINAL VÁLIDA
+df_validos = pd.concat([df_auto_confirmados, df_humano_confirmados], ignore_index=True)
+
+# --- ESTEIRA C: BACKLOG PARA VISITA DE CAMPO ---
+# 1. O que a máquina não deu match (PENDENTE automático)
+df_auto_pendentes = df_bruto[df_bruto['STATUS'] == 'PENDENTE'].copy().rename(columns=renomeios_padrao)
+df_auto_pendentes['MOTIVO_DA_VISITA'] = 'Sem correspondência automática (Baixa Similaridade)'
+
+# 2. O que o revisor humano rejeitou explicitamente
+df_humano_rejeitados = df_revisao_humana[df_revisao_humana['DECISAO'] == 'REJEITADO'].copy()
+df_humano_rejeitados['MOTIVO_DA_VISITA'] = 'Cruzamento inválido rejeitado na revisão humana'
+
+# 3. O que o revisor ficou na dúvida e deixou em branco
+df_humano_duvidosos = df_revisao_humana[df_revisao_humana['DECISAO'].isna() | (df_revisao_humana['DECISAO'] == '')].copy()
+df_humano_duvidosos['MOTIVO_DA_VISITA'] = 'Dúvida na revisão visual (Dados inconsistentes)'
+
+# UNIFICAÇÃO DA LISTA DE CAMPO (Ordenada por Bairro para facilitar a logística de rotas!)
+df_visita_campo = pd.concat([df_auto_pendentes, df_humano_rejeitados, df_humano_duvidosos], ignore_index=True)
+if 'BAIRRO_PESQUISA' in df_visita_campo.columns:
+    df_visita_campo = df_visita_campo.sort_values(by=['BAIRRO_PESQUISA', 'LOGRADOURO_PESQUISA'])
+
+# ==============================================
+# 3. REMOVER DUPLICAÇÕES DE SEGURANÇA
+# ==============================================
+print("\n🧹 Executando faxina final antifraude...")
 antes = len(df_validos)
-
-# Prioridade: mantém o registro com MAIS dados preenchidos
 df_validos['CAMPOS_PREENCHIDOS'] = df_validos.notna().sum(axis=1)
 df_validos = df_validos.sort_values('CAMPOS_PREENCHIDOS', ascending=False)
 df_validos = df_validos.drop_duplicates(subset='OBJECTID', keep='first')
 df_validos = df_validos.drop(columns=['CAMPOS_PREENCHIDOS'])
-
-depois = len(df_validos)
-print(f"   Antes: {antes} | Depois: {depois} | Removidas: {antes - depois}")
+print(f"   Registros limpos na base de entrega: {len(df_validos)} (Removidos {antes - len(df_validos)} conflitos)")
 
 # ==============================================
-# 4. MONTAR PLANILHA LIMPA
+# 4. MAPEAMENTO LIMPO PARA ENTREGA AO CLIENTE
 # ==============================================
-print("\n📊 Montando planilha limpa para entrega...")
+print("\n📊 Estruturando layouts finais...")
 
-# Colunas que vão para o cliente (sem debug)
+# Mapeia apontando para as colunas mestres '_FINAL' validadas
 colunas_entrega = {
     'OBJECTID': 'ID_IMOVEL',
-    'NOME_PESQUISA': 'NOME_PROPRIETARIO',
-    'CPF_CNPJ_PESQUISA': 'CPF_CNPJ',
-    'ENDERECO_PESQUISA': 'ENDERECO_IMOVEL',
+    'NOME_FINAL': 'NOME_PROPRIETARIO',
+    'CPF_FINAL': 'CPF_CNPJ',
+    'TEL_FINAL': 'TELEFONE',
+    'LOGRADOURO_PESQUISA': 'LOGRADOURO',
+    'NUMERO_PESQUISA': 'NUMERO',
     'BAIRRO_PESQUISA': 'BAIRRO',
-    'TELEFONE_PESQUISA': 'TELEFONE',
     'INSCRICAO_IPTU': 'INSCRICAO_IMOBILIARIA',
-    'SAUDE_NOME': 'NOME_ATUALIZADO_SAUDE',
-    'SAUDE_DATA_NASC': 'DATA_NASCIMENTO',
-    'SAUDE_TELEFONE': 'TELEFONE_SAUDE',
-    'SAUDE_CARTAO_SUS': 'CARTAO_SUS',
-    'SAUDE_STATUS': 'FONTE_SAUDE',
+    'NOME_SAUDE': 'NOME_CADASTRAL_SUS',
+    'DATA_NASC': 'DATA_NASCIMENTO',
+    'TEL_SAUDE': 'TELEFONE_SAUDE',
+    'SAUDE_STATUS': 'STATUS_ENRIQUECIMENTO',
 }
 
-# Seleciona e renomeia apenas as colunas que existem
 df_entrega = pd.DataFrame()
 for col_origem, col_destino in colunas_entrega.items():
     if col_origem in df_validos.columns:
         df_entrega[col_destino] = df_validos[col_origem]
 
-# Formata CPF (xxx.xxx.xxx-xx)
+# --- FORMATADORES SENSORIAIS (CPF e Telefone) ---
 def formatar_cpf(cpf):
-    if pd.isna(cpf) or str(cpf) == '':
-        return ''
-    cpf = str(cpf).replace('.0', '')  # Remove .0 do float
-    cpf = cpf.zfill(11)  # Completa com zeros à esquerda
-    return f'{cpf[:3]}.{cpf[3:6]}.{cpf[6:9]}-{cpf[9:11]}'
+    if pd.isna(cpf) or str(cpf).strip() in ['', 'nan', 'None']: return ''
+    limpo = ''.join(filter(str.isdigit, str(cpf)))
+    if len(limpo) == 11: return f'{limpo[:3]}.{limpo[3:6]}.{limpo[6:9]}-{limpo[9:11]}'
+    if len(limpo) == 14: return f'{limpo[:2]}.{limpo[2:5]}.{limpo[5:8]}/{limpo[8:12]}-{limpo[12:]}'
+    return limpo
+
+def formatar_tel(tel):
+    if pd.isna(tel) or str(tel).strip() in ['', 'nan', 'None']: return ''
+    limpo = ''.join(filter(str.isdigit, str(tel)))
+    if len(limpo) == 11: return f'({limpo[:2]}) {limpo[2:7]}-{limpo[7:]}'
+    if len(limpo) == 10: return f'({limpo[:2]}) {limpo[2:6]}-{limpo[6:]}'
+    return limpo
 
 if 'CPF_CNPJ' in df_entrega.columns:
     df_entrega['CPF_CNPJ'] = df_entrega['CPF_CNPJ'].apply(formatar_cpf)
-
-# Formata telefone ((XX) XXXXX-XXXX)
-def formatar_tel(tel):
-    if pd.isna(tel) or str(tel) == '':
-        return ''
-    tel = str(tel).replace('.0', '')
-    if len(tel) == 11:
-        return f'({tel[:2]}) {tel[2:7]}-{tel[7:]}'
-    elif len(tel) == 10:
-        return f'({tel[:2]}) {tel[2:6]}-{tel[6:]}'
-    return tel
-
 if 'TELEFONE' in df_entrega.columns:
     df_entrega['TELEFONE'] = df_entrega['TELEFONE'].apply(formatar_tel)
 if 'TELEFONE_SAUDE' in df_entrega.columns:
     df_entrega['TELEFONE_SAUDE'] = df_entrega['TELEFONE_SAUDE'].apply(formatar_tel)
 
-# Ordena por ID
-if 'ID_IMOVEL' in df_entrega.columns:
-    df_entrega = df_entrega.sort_values('ID_IMOVEL')
-
-print(f"   Registros finais: {len(df_entrega)}")
-print(f"   Colunas: {list(df_entrega.columns)}")
-
 # ==============================================
-# 5. EXPORTAR
+# 5. EXPORTAÇÃO DOS PRODUTOS
 # ==============================================
-print("\n💾 Exportando...")
+print("\n💾 Gravando planilhas finais...")
 
-# Arquivo principal (pronto para entrega)
+# 1. Base Pronta para o Cliente
 df_entrega.to_excel(f'{PASTA_OUTPUT}/CADASTRO_IMOBILIARIO_FINAL.xlsx', index=False)
 
-# Também exporta os que ficaram de fora
-df_pendentes = df[df['STATUS'] != 'CONFIRMADO']
-df_pendentes.to_excel(f'{PASTA_OUTPUT}/PENDENCIAS_REMANESCENTES.xlsx', index=False)
+# 2. Backlog do Campo (Apenas colunas úteis para o leiturista/fiscal na rua)
+colunas_campo_reais = [
+    'OBJECTID', 'MOTIVO_DA_VISITA', 'NOME_PESQUISA', 'CPF_PESQUISA', 
+    'LOGRADOURO_PESQUISA', 'NUMERO_PESQUISA', 'BAIRRO_PESQUISA', 'TEL_PESQUISA',
+    'NOME_IPTU', 'INSCRICAO_IPTU', 'LOGRADOURO_IPTU', 'BAIRRO_IPTU'
+]
+colunas_campo_exportar = [c for c in colunas_campo_reais if c in df_visita_campo.columns]
+df_visita_campo[colunas_campo_exportar].to_excel(f'{PASTA_OUTPUT}/LISTA_VISITA_CAMPO.xlsx', index=False)
 
-# Indicadores finais
+# 3. Painel de Controle (Indicadores)
+total_geral = len(df_bruto)
 pd.DataFrame({
     'Indicador': [
-        'Total de imóveis na pesquisa',
-        'Imóveis na base final (confirmados)',
-        'Percentual de aproveitamento',
-        'Imóveis enriquecidos pela saúde',
-        'Pendências remanescentes',
-        'Data de processamento'
+        'Total de Imóveis Processados',
+        'Imóveis Saneados com Sucesso (Entrega)',
+        'Percentual de Solutividade Cadastral',
+        'Imóveis Encaminhados para Revisão de Campo',
+        'Data do Fechamento do Lote'
     ],
     'Valor': [
-        9279,
+        total_geral,
         len(df_entrega),
-        f"{round(len(df_entrega)/9279*100, 1)}%",
-        len(df_entrega[df_entrega['STATUS_SAUDE'] == 'ENCONTRADO']) if 'STATUS_SAUDE' in df_entrega.columns else 0,
-        len(df_pendentes),
+        f"{round(len(df_entrega)/total_geral*100, 1)}%",
+        len(df_visita_campo),
         datetime.now().strftime('%d/%m/%Y %H:%M')
     ]
-}).to_excel(f'{PASTA_OUTPUT}/INDICADORES_ENTREGA.xlsx', index=False)
+}).to_excel(f'{PASTA_OUTPUT}/INDICADORES_FECHAMENTO.xlsx', index=False)
 
-print(f"\n📁 Resultados em: {PASTA_OUTPUT}/")
-print("   ✅ CADASTRO_IMOBILIARIO_FINAL.xlsx ← ENTREGAR AO CLIENTE")
-print("   ✅ PENDENCIAS_REMANESCENTES.xlsx")
-print("   ✅ INDICADORES_ENTREGA.xlsx")
-print("\n🎉 Base final consolidada com sucesso!")
+print(f"\n📁 Lote finalizado com sucesso em: {PASTA_OUTPUT}/")
+print("   ✅ CADASTRO_IMOBILIARIO_FINAL.xlsx  -> (Base rica e higienizada para entrega)")
+print("   ✅ LISTA_VISITA_CAMPO.xlsx          -> (Roteirizada por Bairro com motivos claros)")
+print("   ✅ INDICADORES_FECHAMENTO.xlsx      -> (Métricas de desempenho do projeto)")
+print("\n🎉 Processo concluído de ponta a ponta!")
