@@ -1,0 +1,33 @@
+[33mcommit 69cc56a57a9911374b87118d83f845268b7ec834[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m
+Merge: 7e95ebc b888f09
+Author: renatorag92 <araujo.renato@escolar.ifrn.edu.br>
+Date:   Wed Jul 22 10:19:48 2026 -0300
+
+    Merge branch 'feature/enriquecimento-saude'
+
+[33mcommit b888f09b33c94c777da4f396125050ea168b6fd1[m
+Author: renatorag92 <araujo.renato@escolar.ifrn.edu.br>
+Date:   Wed Jul 22 09:11:23 2026 -0300
+
+    feat: implementa heurísticas de fonte, fórmulas reativas no excel e lista de campo inteligente
+
+[33mcommit 7e95ebcd59beb707c8fb9a71b0721c7f493d974d[m
+Merge: 8c35796 7409f44
+Author: Renato Grilo <araujo.renato@escolar.ifrn.edu.br>
+Date:   Tue Jun 9 23:22:51 2026 -0300
+
+    Merge pull request #1 from renatorag92/feature/enriquecimento-saude
+    
+    Adiciona enriquecimento com saúde, planilha de revisão com dropdown e…
+
+[33mcommit 7409f440d46125a581ab612882ffcc590b091a6b[m[33m ([m[1;31morigin/feature/enriquecimento-saude[m[33m)[m
+Author: renatorag92 <araujo.renato@escolar.ifrn.edu.br>
+Date:   Tue Jun 9 23:11:40 2026 -0300
+
+    Adiciona enriquecimento com saúde, planilha de revisão com dropdown e consolidação final
+
+[33mcommit 8c35796450b72145893015e11109735b57f832db[m
+Author: renatorag92 <araujo.renato@escolar.ifrn.edu.br>
+Date:   Sat Jun 6 22:03:19 2026 -0300
+
+    Pipeline de saneamento cadastral - Parelhas/RN

@@ -341,6 +341,34 @@ print(f"   ⚠️ PENDENTES: {pendentes} ({round(pendentes/total*100, 1)}%)")
 # ==============================================
 print("\n💾 Exportando...")
 
+import numpy as np
+
+print("🧹 Aplicando máscara visual nos CPFs e CNPJs...")
+
+colunas_doc = ['CPF_CNPJ_PESQUISA', 'CPF_CNPJ_IPTU']
+
+for col in colunas_doc:
+    if col in df_final.columns:
+        # 1. Garante que só temos números puros
+        df_final[col] = df_final[col].astype(str).str.replace(r'\D', '', regex=True)
+        
+        # 2. Transforma strings inúteis em nulo verdadeiro
+        df_final[col] = df_final[col].replace(['nan', 'None', ''], np.nan)
+        
+        # 3. Função inteligente para aplicar a máscara dependendo do tamanho
+        def formatar_doc(doc):
+            doc = str(doc)
+            if len(doc) <= 11:
+                doc = doc.zfill(11) # Preenche com zeros à esquerda até dar 11
+                return f"{doc[:3]}.{doc[3:6]}.{doc[6:9]}-{doc[9:]}"
+            else:
+                doc = doc.zfill(14) # Preenche com zeros à esquerda até dar 14
+                return f"{doc[:2]}.{doc[2:5]}.{doc[5:8]}/{doc[8:12]}-{doc[12:]}"
+
+        # 4. Aplica apenas nas linhas que possuem algum documento preenchido
+        mask_tem_dado = df_final[col].notna()
+        df_final.loc[mask_tem_dado, col] = df_final.loc[mask_tem_dado, col].apply(formatar_doc)
+
 colunas_finais = [
     'OBJECTID', 'NOME_PESQUISA', 'CPF_CNPJ_PESQUISA', 'ENDERECO_PESQUISA', 'BAIRRO_PESQUISA',
     'TELEFONE_PESQUISA', 'EMAIL_PESQUISA',
