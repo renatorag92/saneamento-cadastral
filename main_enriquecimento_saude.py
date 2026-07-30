@@ -79,6 +79,30 @@ df_saude = pd.read_excel('bases_brutas/base_saude_unificada.xlsx')
 print(f"   Resultado v2: {len(df_resultado)} imóveis")
 print(f"   Saúde: {len(df_saude)} cidadãos")
 
+import re
+
+print("🧹 Separando logradouro, número e bairro da base da Saúde...")
+
+def quebrar_endereco_saude(endereco):
+    if pd.isna(endereco):
+        return "", "", ""
+    texto = str(endereco).strip()
+    # Padrão Regex que usa a vírgula e o ponto para fatiar o texto
+    padrao = r'^(?P<logradouro>[^,]+),\s*(?P<numero>[^.]+)\.\s*(?:[^-]+-\s*)?(?P<bairro>[^,]+),'
+    match = re.search(padrao, texto)
+    
+    if match:
+        logr = match.group('logradouro').strip()
+        num = match.group('numero').strip()
+        bairro = match.group('bairro').strip()
+        return logr, num, bairro
+        
+    return texto, "", ""
+
+df_saude[['LOGRADOURO_SAUDE', 'NUMERO_SAUDE', 'BAIRRO_SAUDE']] = df_saude['Endereço'].apply(
+    lambda x: pd.Series(quebrar_endereco_saude(x))
+)
+
 # ==============================================
 # PADRONIZAR
 # ==============================================
@@ -233,59 +257,41 @@ df_revisao = df_resultado[df_resultado['STATUS'] == 'EM_REVISÃO'].copy()
 
 import numpy as np
 
-# Garante que ambos os CPFs sejam string, MAS substitui vazios por NaN para evitar o produto cartesiano
-df_revisao['CPF_CNPJ_IPTU'] = df_revisao['CPF_CNPJ_IPTU'].fillna('').astype(str).str.replace('.0', '').str.strip().replace('', np.nan)
+# CORREÇÃO: Garante que os CPFs já LIMPOS sejam tratados como string para o cruzamento perfeito
+df_revisao['CPF_LIMPO'] = df_revisao['CPF_LIMPO'].fillna('').astype(str).str.strip().replace('', np.nan)
 df_saude['CPF_VALIDO'] = df_saude['CPF_VALIDO'].fillna('').astype(str).str.strip().replace('', np.nan)
 
-# Limpa duplicatas da saúde ANTES do merge (garante que um CPF retorne apenas 1 endereço)
-df_saude_unicos = df_saude[['CPF_VALIDO', 'Endereço']].dropna(subset=['CPF_VALIDO']).drop_duplicates(subset='CPF_VALIDO', keep='first')
+# Trazemos as novas colunas limpas da saúde no filtro antes do merge
+colunas_saude_busca = ['CPF_VALIDO', 'Endereço', 'LOGRADOURO_SAUDE', 'NUMERO_SAUDE', 'BAIRRO_SAUDE']
+df_saude_unicos = df_saude[colunas_saude_busca].dropna(subset=['CPF_VALIDO']).drop_duplicates(subset='CPF_VALIDO', keep='first')
 
-# Faz merge com a base da saúde para pegar o endereço bruto
+# 🔥 AQUI ESTAVA O ERRO: Trocamos left_on de 'CPF_CNPJ_IPTU' para 'CPF_LIMPO'
 df_revisao = df_revisao.merge(
     df_saude_unicos,
-    left_on='CPF_CNPJ_IPTU',
+    left_on='CPF_LIMPO',   # Usando a versão limpa e padronizada do CPF
     right_on='CPF_VALIDO',
     how='left'
 )
-
 # Remove duplicatas de segurança
 antes = len(df_revisao)
 df_revisao = df_revisao.drop_duplicates(subset=['OBJECTID', 'CPF_CNPJ_IPTU'], keep='first')
 depois = len(df_revisao)
-print(f"   Removidas {antes - depois} duplicatas do merge com saúde")
+print(f"    Removidas {antes - depois} duplicatas do merge com saúde")
 
-# Extrai componentes do endereço de TODAS as fontes
+# Extrai componentes do endereço da Pesquisa e do IPTU
 def extrair_parte(end, indice):
     if pd.isna(end) or not end:
         return ''
     partes = str(end).split(' | ')
     return partes[indice] if len(partes) > indice else ''
 
-# Pesquisa e IPTU (formato canônico: LOGRADOUROADOURO | NUMEROERO | BAIRRORRO)
+# Pesquisa e IPTU (formato canônico: LOGRADOURO | NUMERO | BAIRRO)
 for fonte, col_orig in [('PESQUISA', 'ENDERECO_PESQUISA'), ('IPTU', 'ENDERECO_IPTU')]:
     for i, nome in [(0, 'LOGRADOURO'), (1, 'NUMERO'), (2, 'BAIRRO')]:
         df_revisao[f'{nome}_{fonte}'] = df_revisao[col_orig].apply(lambda x: extrair_parte(x, i))
 
-# Saúde (formato bruto)
-def extrair_LOGRADOUROadouro_saude(end):
-    if pd.isna(end) or not end:
-        return ''
-    partes = str(end).split(',')
-    return partes[0].strip() if len(partes) > 0 else str(end).strip()
-
-def extrair_BAIRROrro_saude(end):
-    if pd.isna(end) or not end:
-        return ''
-    partes = str(end).split(',')
-    if len(partes) >= 3:
-        return partes[1].strip().lstrip('0123456789. ')
-    elif len(partes) >= 2:
-        return partes[1].strip()
-    return ''
-
-df_revisao['LOGRADOURO_SAUDE'] = df_revisao['Endereço'].apply(extrair_LOGRADOUROadouro_saude)
-df_revisao['BAIRRO_SAUDE'] = df_revisao['Endereço'].apply(extrair_BAIRROrro_saude)
-df_revisao['NUMERO_SAUDE'] = ''  # Saúde não tem número separado
+# 🔥 CORREÇÃO 2: Removemos aquelas funções antigas que quebravam o endereço da saúde! 
+# Como as colunas já vieram prontas do merge, não precisamos reextrair nada aqui.
 
 # Renomeia colunas para exibição limpa
 renomeios = {
@@ -350,12 +356,18 @@ df_revisao['FONTE_NOME'] = df_revisao.apply(escolher_fonte_nome, axis=1)
 df_revisao['FONTE_CPF'] = df_revisao.apply(escolher_fonte_cpf, axis=1)
 df_revisao['FONTE_TEL'] = df_revisao.apply(escolher_fonte_telefone, axis=1)
 
+# 🔥 CORREÇÃO 3: Inicializa as colunas de fonte do endereço com o padrão 'PESQUISA'
+for col in ['FONTE_LOGRADOURO', 'FONTE_NUMERO', 'FONTE_BAIRRO']:
+    df_revisao[col] = 'PESQUISA'
+
 # 2. Cria as colunas FINAL vazias
 df_revisao['NOME_FINAL'] = ''
 df_revisao['CPF_FINAL'] = ''
 df_revisao['TEL_FINAL'] = ''
+for col in ['LOGRADOURO_FINAL', 'NUMERO_FINAL', 'BAIRRO_FINAL']:
+    df_revisao[col] = ''
 
-# 3. Layout sem a coluna REVISOR
+# 🔥 CORREÇÃO 4: Organiza o layout incluindo as novas colunas de Endereço no Excel
 colunas_organizadas = [
     'OBJECTID',
     'NOME_PESQUISA', 'NOME_IPTU', 'NOME_SAUDE',
@@ -368,6 +380,9 @@ colunas_organizadas = [
     'FONTE_NOME', 'NOME_FINAL',
     'FONTE_CPF', 'CPF_FINAL',
     'FONTE_TEL', 'TEL_FINAL',
+    'FONTE_LOGRADOURO', 'LOGRADOURO_FINAL',
+    'FONTE_NUMERO', 'NUMERO_FINAL',
+    'FONTE_BAIRRO', 'BAIRRO_FINAL',
     'DECISAO', 'OBSERVACAO'
 ]
 
@@ -410,8 +425,8 @@ for col_idx, cell in enumerate(ws[1], 1):
     if nome_coluna == 'DECISAO':
         dv_decisao.add(f'{col_letra}2:{col_letra}{ws.max_row}')
         
-    # Aplica o dropdown das fontes nas colunas FONTE_
-    elif nome_coluna in ['FONTE_NOME', 'FONTE_CPF', 'FONTE_TEL']:
+    # 🔥 CORREÇÃO 5: Coloca os Dropdowns nas novas colunas FONTE_ do endereço
+    elif nome_coluna in ['FONTE_NOME', 'FONTE_CPF', 'FONTE_TEL', 'FONTE_LOGRADOURO', 'FONTE_NUMERO', 'FONTE_BAIRRO']:
         dv_fonte.add(f'{col_letra}2:{col_letra}{ws.max_row}')
 
 # 3. Injeta as fórmulas
@@ -424,6 +439,16 @@ for r in range(2, ws.max_row + 1):
 
     f_tel = f'=IF({letras["FONTE_TEL"]}{r}="PESQUISA", {letras["TEL_PESQUISA"]}{r}, IF({letras["FONTE_TEL"]}{r}="IPTU", {letras["TEL_IPTU"]}{r}, IF({letras["FONTE_TEL"]}{r}="SAUDE", {letras["TEL_SAUDE"]}{r}, "")))'
     ws[f'{letras["TEL_FINAL"]}{r}'] = f_tel
+
+    # 🔥 CORREÇÃO 6: Injeta as fórmulas inteligentes de Endereço no loop de linhas
+    f_logr = f'=IF({letras["FONTE_LOGRADOURO"]}{r}="PESQUISA", {letras["LOGRADOURO_PESQUISA"]}{r}, IF({letras["FONTE_LOGRADOURO"]}{r}="IPTU", {letras["LOGRADOURO_IPTU"]}{r}, IF({letras["FONTE_LOGRADOURO"]}{r}="SAUDE", {letras["LOGRADOURO_SAUDE"]}{r}, "")))'
+    ws[f'{letras["LOGRADOURO_FINAL"]}{r}'] = f_logr
+
+    f_num = f'=IF({letras["FONTE_NUMERO"]}{r}="PESQUISA", {letras["NUMERO_PESQUISA"]}{r}, IF({letras["FONTE_NUMERO"]}{r}="IPTU", {letras["NUMERO_IPTU"]}{r}, IF({letras["FONTE_NUMERO"]}{r}="SAUDE", {letras["NUMERO_SAUDE"]}{r}, "")))'
+    ws[f'{letras["NUMERO_FINAL"]}{r}'] = f_num
+
+    f_bairro = f'=IF({letras["FONTE_BAIRRO"]}{r}="PESQUISA", {letras["BAIRRO_PESQUISA"]}{r}, IF({letras["FONTE_BAIRRO"]}{r}="IPTU", {letras["BAIRRO_IPTU"]}{r}, IF({letras["FONTE_BAIRRO"]}{r}="SAUDE", {letras["BAIRRO_SAUDE"]}{r}, "")))'
+    ws[f'{letras["BAIRRO_FINAL"]}{r}'] = f_bairro
 
 wb.save(f'{PASTA_OUTPUT}/PLANILHA_REVISAO_ENRIQUECIDA.xlsx')
 print("   ✅ Fórmulas e Dropdowns inteligentes aplicados com sucesso!")
